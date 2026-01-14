@@ -3,6 +3,11 @@
   "name": "AlQuran.ca better annotations",
   "version": "1.0.0",
   "description": "Adds brackets around italicized translator annotations on alquran.ca for better readability",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "content_scripts": [
     {
       "matches": ["https://alquran.ca/read*"],
