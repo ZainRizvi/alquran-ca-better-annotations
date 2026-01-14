@@ -6,6 +6,9 @@ AlQuran.ca Better Annotations
 ## Summary (132 char max)
 Adds brackets around translator annotations on alquran.ca to distinguish them from the Quran translation.
 
+## Purpose
+Improve readability of the translation of the Quran on alquran.ca by adding brackets around translator annotations to distinguish them from the Quran translation.
+
 ## Description
 This extension improves readability on alquran.ca/read by adding brackets around the translator's annotations.
 
