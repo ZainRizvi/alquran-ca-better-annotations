@@ -46,7 +46,17 @@ To temporarily disable the extension:
 
 4. **Wait for review** (typically 1-3 business days)
 
+## Development
+
+**Regenerate icons** (if you modify `icons/logo source.png`):
+```bash
+npm install
+npm run generate-icons
+```
+
 ## Files
 
 - `manifest.json` - Chrome extension configuration
 - `content.js` - Script that adds brackets to italic text
+- `icons/` - Extension icons (16x16, 48x48, 128x128)
+- `scripts/generate-icons.js` - Icon generation from source image
