@@ -1,22 +1,65 @@
-(function() {
+// UMD pattern - works in browser and Node.js for testing
+(function(root, factory) {
+  if (typeof module !== 'undefined' && module.exports) {
+    // Node.js / test environment
+    module.exports = factory();
+  } else {
+    // Browser environment
+    root.BracketLogic = factory();
+    // Auto-run in browser
+    if (typeof document !== 'undefined') {
+      root.BracketLogic.init();
+    }
+  }
+})(typeof self !== 'undefined' ? self : this, function() {
   'use strict';
 
   const PROCESSED_ATTR = 'data-bracket-processed';
   const BRACKET_OPEN = 'data-bracket-open';
   const BRACKET_CLOSE = 'data-bracket-close';
 
-  // Check if text contains only whitespace and punctuation (no word characters)
+  // --- Pure functions (no DOM dependency) ---
+
+  // Check if text contains any word characters (letters from any language)
   function hasWordCharacters(text) {
     return /\p{L}/u.test(text);
   }
 
+  // Check if text is only whitespace and/or sentence-ending punctuation
+  function isOnlyWhitespaceOrPunctuation(text) {
+    return /^[\s.!?]*$/.test(text);
+  }
+
+  // Extract trailing whitespace and sentence punctuation from text
+  // Returns { trimmed: string, trailing: string }
+  function extractTrailing(text) {
+    const match = text.match(/^(.*?)([\s.!?]*)$/s);
+    if (match) {
+      return { trimmed: match[1], trailing: match[2] };
+    }
+    return { trimmed: text, trailing: '' };
+  }
+
+  // Extract leading whitespace from text
+  // Returns { leading: string, trimmed: string }
+  function extractLeading(text) {
+    const match = text.match(/^(\s*)(.*?)$/s);
+    if (match) {
+      return { leading: match[1], trimmed: match[2] };
+    }
+    return { leading: '', trimmed: text };
+  }
+
+  // --- DOM-dependent functions ---
+
   // Check if an element is an italic annotation (not Arabic title styling)
   function isItalicAnnotation(element) {
+    if (!element || !element.tagName) return false;
     const tagName = element.tagName.toLowerCase();
     if (tagName !== 'i' && tagName !== 'em') return false;
     if (element.hasAttribute(PROCESSED_ATTR)) return false;
-    if (element.classList.contains('MuiTypography-titleArabic')) return false;
-    if (!element.textContent.trim()) return false;
+    if (element.classList && element.classList.contains('MuiTypography-titleArabic')) return false;
+    if (!element.textContent || !element.textContent.trim()) return false;
     return true;
   }
 
@@ -78,26 +121,27 @@
   }
 
   // Create a bracket span element
-  function createBracketSpan(type, char) {
-    const span = document.createElement('span');
+  function createBracketSpan(doc, type, char) {
+    const span = doc.createElement('span');
     span.setAttribute(type, 'true');
     span.textContent = char;
     return span;
   }
 
   // Add brackets around a group of italic elements
-  function addBracketsToGroup(group) {
+  function addBracketsToGroup(group, doc) {
     if (group.length === 0) return;
+    doc = doc || document;
 
     const firstElement = group[0];
     const lastElement = group[group.length - 1];
 
     group.forEach(el => el.setAttribute(PROCESSED_ATTR, 'true'));
 
-    const openBracket = createBracketSpan(BRACKET_OPEN, '[');
+    const openBracket = createBracketSpan(doc, BRACKET_OPEN, '[');
     firstElement.parentNode.insertBefore(openBracket, firstElement);
 
-    const closeBracket = createBracketSpan(BRACKET_CLOSE, ']');
+    const closeBracket = createBracketSpan(doc, BRACKET_CLOSE, ']');
     if (lastElement.nextSibling) {
       lastElement.parentNode.insertBefore(closeBracket, lastElement.nextSibling);
     } else {
@@ -106,10 +150,11 @@
   }
 
   // Get text content between two elements by traversing DOM
-  function getTextBetweenElements(startEl, endEl) {
+  function getTextBetweenElements(startEl, endEl, doc) {
+    doc = doc || document;
     let text = '';
-    const treeWalker = document.createTreeWalker(
-      document.body,
+    const treeWalker = doc.createTreeWalker(
+      doc.body,
       NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
       null,
       false
@@ -128,7 +173,6 @@
         break;
       }
       if (foundStart && node.nodeType === Node.TEXT_NODE) {
-        // Skip text inside bracket spans
         if (!node.parentElement?.hasAttribute(BRACKET_OPEN) &&
             !node.parentElement?.hasAttribute(BRACKET_CLOSE)) {
           text += node.textContent;
@@ -141,24 +185,22 @@
   }
 
   // Normalize text boundaries - move whitespace and punctuation outside brackets
-  function normalizeBracketBoundaries() {
+  function normalizeBracketBoundaries(doc) {
+    doc = doc || document;
+
     // Process closing brackets - move trailing whitespace and sentence punctuation outside
-    const closeBrackets = document.querySelectorAll('[' + BRACKET_CLOSE + ']');
+    const closeBrackets = doc.querySelectorAll('[' + BRACKET_CLOSE + ']');
 
     closeBrackets.forEach(closeBracket => {
       const prevSibling = closeBracket.previousSibling;
       if (!prevSibling) return;
 
-      // Get the last text content before the closing bracket
       let textNode = null;
-      let element = null;
 
       if (prevSibling.nodeType === Node.TEXT_NODE) {
         textNode = prevSibling;
       } else if (prevSibling.nodeType === Node.ELEMENT_NODE) {
-        element = prevSibling;
-        // Find the last text node inside the element
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        const walker = doc.createTreeWalker(prevSibling, NodeFilter.SHOW_TEXT, null, false);
         let lastText = null;
         while (walker.nextNode()) {
           lastText = walker.currentNode;
@@ -167,24 +209,17 @@
       }
 
       if (textNode && textNode.textContent) {
-        // Match trailing whitespace and/or sentence-ending punctuation
-        const match = textNode.textContent.match(/(\s*[.!?]?\s*)$/);
-        if (match && match[1] && match[1].length > 0) {
-          const trailing = match[1];
-          // Only move if it's whitespace or punctuation we want outside
-          if (/^[\s.!?]+$/.test(trailing)) {
-            // Remove from inside
-            textNode.textContent = textNode.textContent.slice(0, -trailing.length);
-            // Add after closing bracket
-            const textAfter = document.createTextNode(trailing);
-            closeBracket.parentNode.insertBefore(textAfter, closeBracket.nextSibling);
-          }
+        const { trimmed, trailing } = extractTrailing(textNode.textContent);
+        if (trailing && trailing.length > 0) {
+          textNode.textContent = trimmed;
+          const textAfter = doc.createTextNode(trailing);
+          closeBracket.parentNode.insertBefore(textAfter, closeBracket.nextSibling);
         }
       }
     });
 
     // Process opening brackets - move leading whitespace outside
-    const openBrackets = document.querySelectorAll('[' + BRACKET_OPEN + ']');
+    const openBrackets = doc.querySelectorAll('[' + BRACKET_OPEN + ']');
 
     openBrackets.forEach(openBracket => {
       const nextSibling = openBracket.nextSibling;
@@ -195,22 +230,17 @@
       if (nextSibling.nodeType === Node.TEXT_NODE) {
         textNode = nextSibling;
       } else if (nextSibling.nodeType === Node.ELEMENT_NODE) {
-        // Find the first text node inside the element
-        const walker = document.createTreeWalker(nextSibling, NodeFilter.SHOW_TEXT, null, false);
+        const walker = doc.createTreeWalker(nextSibling, NodeFilter.SHOW_TEXT, null, false);
         if (walker.nextNode()) {
           textNode = walker.currentNode;
         }
       }
 
       if (textNode && textNode.textContent) {
-        // Match leading whitespace
-        const match = textNode.textContent.match(/^(\s+)/);
-        if (match && match[1]) {
-          const leading = match[1];
-          // Remove from inside
-          textNode.textContent = textNode.textContent.slice(leading.length);
-          // Add before opening bracket
-          const textBefore = document.createTextNode(leading);
+        const { leading, trimmed } = extractLeading(textNode.textContent);
+        if (leading && leading.length > 0) {
+          textNode.textContent = trimmed;
+          const textBefore = doc.createTextNode(leading);
           openBracket.parentNode.insertBefore(textBefore, openBracket);
         }
       }
@@ -218,13 +248,14 @@
   }
 
   // Merge brackets across container boundaries
-  function mergeCrossContainerBrackets() {
-    const closeBrackets = Array.from(document.querySelectorAll('[' + BRACKET_CLOSE + ']'));
-    const openBrackets = Array.from(document.querySelectorAll('[' + BRACKET_OPEN + ']'));
+  function mergeCrossContainerBrackets(doc) {
+    doc = doc || document;
+
+    const closeBrackets = Array.from(doc.querySelectorAll('[' + BRACKET_CLOSE + ']'));
+    const openBrackets = Array.from(doc.querySelectorAll('[' + BRACKET_OPEN + ']'));
 
     if (closeBrackets.length === 0 || openBrackets.length === 0) return;
 
-    // Sort by document position
     const allBrackets = [...closeBrackets, ...openBrackets].sort((a, b) => {
       const pos = a.compareDocumentPosition(b);
       if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
@@ -232,32 +263,30 @@
       return 0;
     });
 
-    // Find ]...[ pairs and check if they should merge
     const toRemove = [];
 
     for (let i = 0; i < allBrackets.length - 1; i++) {
       const current = allBrackets[i];
       const next = allBrackets[i + 1];
 
-      // Looking for ] followed by [
       if (current.hasAttribute(BRACKET_CLOSE) && next.hasAttribute(BRACKET_OPEN)) {
-        const textBetween = getTextBetweenElements(current, next);
+        const textBetween = getTextBetweenElements(current, next, doc);
 
         if (!hasWordCharacters(textBetween)) {
-          // Can merge - mark both for removal
           toRemove.push(current, next);
-          i++; // Skip the open bracket we just processed
+          i++;
         }
       }
     }
 
-    // Remove the bracket pairs
     toRemove.forEach(el => el.remove());
   }
 
   // Process all unprocessed italic elements
-  function processItalics() {
-    const italicElements = document.querySelectorAll('i:not([' + PROCESSED_ATTR + ']), em:not([' + PROCESSED_ATTR + '])');
+  function processItalics(doc) {
+    doc = doc || document;
+
+    const italicElements = doc.querySelectorAll('i:not([' + PROCESSED_ATTR + ']), em:not([' + PROCESSED_ATTR + '])');
 
     for (const element of italicElements) {
       if (!isItalicAnnotation(element)) {
@@ -266,49 +295,75 @@
       }
 
       const group = findItalicGroupInParent(element);
-      addBracketsToGroup(group);
+      addBracketsToGroup(group, doc);
     }
 
-    // Second pass: normalize whitespace and punctuation at bracket boundaries
-    normalizeBracketBoundaries();
-
-    // Third pass: merge across container boundaries
-    mergeCrossContainerBrackets();
+    normalizeBracketBoundaries(doc);
+    mergeCrossContainerBrackets(doc);
   }
 
-  // Initial processing
-  processItalics();
+  // Initialize - set up observer and run initial processing
+  function init() {
+    if (typeof document === 'undefined') return;
 
-  // Watch for dynamic content changes
-  const observer = new MutationObserver((mutations) => {
-    let shouldProcess = false;
+    processItalics(document);
 
-    for (const mutation of mutations) {
-      if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            if (node.tagName && (node.tagName.toLowerCase() === 'i' || node.tagName.toLowerCase() === 'em')) {
-              shouldProcess = true;
-              break;
-            }
-            if (node.querySelector && node.querySelector('i, em')) {
-              shouldProcess = true;
-              break;
+    const observer = new MutationObserver((mutations) => {
+      let shouldProcess = false;
+
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.tagName && (node.tagName.toLowerCase() === 'i' || node.tagName.toLowerCase() === 'em')) {
+                shouldProcess = true;
+                break;
+              }
+              if (node.querySelector && node.querySelector('i, em')) {
+                shouldProcess = true;
+                break;
+              }
             }
           }
         }
+        if (shouldProcess) break;
       }
-      if (shouldProcess) break;
-    }
 
-    if (shouldProcess) {
-      clearTimeout(observer.timeout);
-      observer.timeout = setTimeout(processItalics, 100);
-    }
-  });
+      if (shouldProcess) {
+        clearTimeout(observer.timeout);
+        observer.timeout = setTimeout(() => processItalics(document), 100);
+      }
+    });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-})();
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  // Export public API
+  return {
+    // Constants
+    PROCESSED_ATTR,
+    BRACKET_OPEN,
+    BRACKET_CLOSE,
+
+    // Pure functions
+    hasWordCharacters,
+    isOnlyWhitespaceOrPunctuation,
+    extractTrailing,
+    extractLeading,
+
+    // DOM functions
+    isItalicAnnotation,
+    canMergeNodes,
+    findItalicGroupInParent,
+    createBracketSpan,
+    addBracketsToGroup,
+    getTextBetweenElements,
+    normalizeBracketBoundaries,
+    mergeCrossContainerBrackets,
+    processItalics,
+    init
+  };
+});
