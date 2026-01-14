@@ -2,11 +2,11 @@
   'use strict';
 
   const PROCESSED_ATTR = 'data-bracket-processed';
+  const BRACKET_OPEN = 'data-bracket-open';
+  const BRACKET_CLOSE = 'data-bracket-close';
 
   // Check if text contains only whitespace and punctuation (no word characters)
-  // This regex matches if there are any word characters (letters, including Unicode)
   function hasWordCharacters(text) {
-    // Match any letter from any language
     return /\p{L}/u.test(text);
   }
 
@@ -14,42 +14,22 @@
   function isItalicAnnotation(element) {
     const tagName = element.tagName.toLowerCase();
     if (tagName !== 'i' && tagName !== 'em') return false;
-
-    // Skip if already processed
     if (element.hasAttribute(PROCESSED_ATTR)) return false;
-
-    // Skip if it's part of the Arabic title (has MuiTypography class with titleArabic)
     if (element.classList.contains('MuiTypography-titleArabic')) return false;
-
-    // Skip if empty
     if (!element.textContent.trim()) return false;
-
     return true;
   }
 
-  // Get all sibling nodes between two elements (exclusive)
-  function getNodesBetween(startNode, endNode) {
-    const nodes = [];
-    let current = startNode.nextSibling;
-    while (current && current !== endNode) {
-      nodes.push(current);
-      current = current.nextSibling;
-    }
-    return nodes;
-  }
-
   // Check if nodes between two italic elements contain only whitespace/punctuation
-  function canMerge(nodesBetween) {
+  function canMergeNodes(nodesBetween) {
     for (const node of nodesBetween) {
       if (node.nodeType === Node.TEXT_NODE) {
         if (hasWordCharacters(node.textContent)) {
           return false;
         }
       } else if (node.nodeType === Node.ELEMENT_NODE) {
-        // If there's another element between them, check if it's also italic
         const tagName = node.tagName.toLowerCase();
         if (tagName !== 'i' && tagName !== 'em') {
-          // Non-italic element - check its text content
           if (hasWordCharacters(node.textContent)) {
             return false;
           }
@@ -59,13 +39,12 @@
     return true;
   }
 
-  // Find a group of consecutive italic elements that should be merged
-  function findItalicGroup(startElement) {
+  // Find a group of consecutive italic elements within same parent
+  function findItalicGroupInParent(startElement) {
     const group = [startElement];
     let current = startElement;
 
     while (true) {
-      // Look for next italic sibling
       let nextItalic = null;
       let sibling = current.nextSibling;
       const nodesBetween = [];
@@ -77,10 +56,8 @@
             nextItalic = sibling;
             break;
           } else if (tagName === 'i' || tagName === 'em') {
-            // Already processed italic, stop
             break;
           } else {
-            // Other element, check if we can merge through it
             nodesBetween.push(sibling);
           }
         } else if (sibling.nodeType === Node.TEXT_NODE) {
@@ -89,7 +66,7 @@
         sibling = sibling.nextSibling;
       }
 
-      if (nextItalic && canMerge(nodesBetween)) {
+      if (nextItalic && canMergeNodes(nodesBetween)) {
         group.push(nextItalic);
         current = nextItalic;
       } else {
@@ -100,6 +77,14 @@
     return group;
   }
 
+  // Create a bracket span element
+  function createBracketSpan(type, char) {
+    const span = document.createElement('span');
+    span.setAttribute(type, 'true');
+    span.textContent = char;
+    return span;
+  }
+
   // Add brackets around a group of italic elements
   function addBracketsToGroup(group) {
     if (group.length === 0) return;
@@ -107,15 +92,12 @@
     const firstElement = group[0];
     const lastElement = group[group.length - 1];
 
-    // Mark all elements as processed
     group.forEach(el => el.setAttribute(PROCESSED_ATTR, 'true'));
 
-    // Insert opening bracket before first element
-    const openBracket = document.createTextNode('[');
+    const openBracket = createBracketSpan(BRACKET_OPEN, '[');
     firstElement.parentNode.insertBefore(openBracket, firstElement);
 
-    // Insert closing bracket after last element
-    const closeBracket = document.createTextNode(']');
+    const closeBracket = createBracketSpan(BRACKET_CLOSE, ']');
     if (lastElement.nextSibling) {
       lastElement.parentNode.insertBefore(closeBracket, lastElement.nextSibling);
     } else {
@@ -123,20 +105,95 @@
     }
   }
 
-  // Process all unprocessed italic elements on the page
+  // Get text content between two elements by traversing DOM
+  function getTextBetweenElements(startEl, endEl) {
+    let text = '';
+    const treeWalker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+      null,
+      false
+    );
+
+    let foundStart = false;
+    let node = treeWalker.currentNode;
+
+    while (node) {
+      if (node === startEl) {
+        foundStart = true;
+        node = treeWalker.nextNode();
+        continue;
+      }
+      if (node === endEl) {
+        break;
+      }
+      if (foundStart && node.nodeType === Node.TEXT_NODE) {
+        // Skip text inside bracket spans
+        if (!node.parentElement?.hasAttribute(BRACKET_OPEN) &&
+            !node.parentElement?.hasAttribute(BRACKET_CLOSE)) {
+          text += node.textContent;
+        }
+      }
+      node = treeWalker.nextNode();
+    }
+
+    return text;
+  }
+
+  // Merge brackets across container boundaries
+  function mergeCrossContainerBrackets() {
+    const closeBrackets = Array.from(document.querySelectorAll('[' + BRACKET_CLOSE + ']'));
+    const openBrackets = Array.from(document.querySelectorAll('[' + BRACKET_OPEN + ']'));
+
+    if (closeBrackets.length === 0 || openBrackets.length === 0) return;
+
+    // Sort by document position
+    const allBrackets = [...closeBrackets, ...openBrackets].sort((a, b) => {
+      const pos = a.compareDocumentPosition(b);
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
+
+    // Find ]...[ pairs and check if they should merge
+    const toRemove = [];
+
+    for (let i = 0; i < allBrackets.length - 1; i++) {
+      const current = allBrackets[i];
+      const next = allBrackets[i + 1];
+
+      // Looking for ] followed by [
+      if (current.hasAttribute(BRACKET_CLOSE) && next.hasAttribute(BRACKET_OPEN)) {
+        const textBetween = getTextBetweenElements(current, next);
+
+        if (!hasWordCharacters(textBetween)) {
+          // Can merge - mark both for removal
+          toRemove.push(current, next);
+          i++; // Skip the open bracket we just processed
+        }
+      }
+    }
+
+    // Remove the bracket pairs
+    toRemove.forEach(el => el.remove());
+  }
+
+  // Process all unprocessed italic elements
   function processItalics() {
     const italicElements = document.querySelectorAll('i:not([' + PROCESSED_ATTR + ']), em:not([' + PROCESSED_ATTR + '])');
 
     for (const element of italicElements) {
       if (!isItalicAnnotation(element)) {
-        // Mark as processed even if we skip it
         element.setAttribute(PROCESSED_ATTR, 'true');
         continue;
       }
 
-      const group = findItalicGroup(element);
+      const group = findItalicGroupInParent(element);
       addBracketsToGroup(group);
     }
+
+    // Second pass: merge across container boundaries
+    mergeCrossContainerBrackets();
   }
 
   // Initial processing
@@ -150,7 +207,6 @@
       if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // Check if the added node contains italic elements
             if (node.tagName && (node.tagName.toLowerCase() === 'i' || node.tagName.toLowerCase() === 'em')) {
               shouldProcess = true;
               break;
@@ -166,7 +222,6 @@
     }
 
     if (shouldProcess) {
-      // Debounce processing
       clearTimeout(observer.timeout);
       observer.timeout = setTimeout(processItalics, 100);
     }
