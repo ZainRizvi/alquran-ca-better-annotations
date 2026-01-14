@@ -27,6 +27,25 @@ To temporarily disable the extension:
 2. Find "AlQuran.ca better annotations"
 3. Toggle the switch to disable
 
+## Publishing to Chrome Web Store
+
+1. **Create a developer account** at [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole) ($5 one-time fee)
+
+2. **Build the package:**
+   ```bash
+   npm run package
+   ```
+   This creates `alquran-ca-better-annotations.zip`
+
+3. **Upload to Chrome Web Store:**
+   - Go to the Developer Dashboard
+   - Click "New Item"
+   - Upload the zip file
+   - Fill in store listing (description, screenshots, category)
+   - Submit for review
+
+4. **Wait for review** (typically 1-3 business days)
+
 ## Files
 
 - `manifest.json` - Chrome extension configuration
