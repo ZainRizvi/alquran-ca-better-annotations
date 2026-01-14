@@ -140,6 +140,83 @@
     return text;
   }
 
+  // Normalize text boundaries - move whitespace and punctuation outside brackets
+  function normalizeBracketBoundaries() {
+    // Process closing brackets - move trailing whitespace and sentence punctuation outside
+    const closeBrackets = document.querySelectorAll('[' + BRACKET_CLOSE + ']');
+
+    closeBrackets.forEach(closeBracket => {
+      const prevSibling = closeBracket.previousSibling;
+      if (!prevSibling) return;
+
+      // Get the last text content before the closing bracket
+      let textNode = null;
+      let element = null;
+
+      if (prevSibling.nodeType === Node.TEXT_NODE) {
+        textNode = prevSibling;
+      } else if (prevSibling.nodeType === Node.ELEMENT_NODE) {
+        element = prevSibling;
+        // Find the last text node inside the element
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        let lastText = null;
+        while (walker.nextNode()) {
+          lastText = walker.currentNode;
+        }
+        textNode = lastText;
+      }
+
+      if (textNode && textNode.textContent) {
+        // Match trailing whitespace and/or sentence-ending punctuation
+        const match = textNode.textContent.match(/(\s*[.!?]?\s*)$/);
+        if (match && match[1] && match[1].length > 0) {
+          const trailing = match[1];
+          // Only move if it's whitespace or punctuation we want outside
+          if (/^[\s.!?]+$/.test(trailing)) {
+            // Remove from inside
+            textNode.textContent = textNode.textContent.slice(0, -trailing.length);
+            // Add after closing bracket
+            const textAfter = document.createTextNode(trailing);
+            closeBracket.parentNode.insertBefore(textAfter, closeBracket.nextSibling);
+          }
+        }
+      }
+    });
+
+    // Process opening brackets - move leading whitespace outside
+    const openBrackets = document.querySelectorAll('[' + BRACKET_OPEN + ']');
+
+    openBrackets.forEach(openBracket => {
+      const nextSibling = openBracket.nextSibling;
+      if (!nextSibling) return;
+
+      let textNode = null;
+
+      if (nextSibling.nodeType === Node.TEXT_NODE) {
+        textNode = nextSibling;
+      } else if (nextSibling.nodeType === Node.ELEMENT_NODE) {
+        // Find the first text node inside the element
+        const walker = document.createTreeWalker(nextSibling, NodeFilter.SHOW_TEXT, null, false);
+        if (walker.nextNode()) {
+          textNode = walker.currentNode;
+        }
+      }
+
+      if (textNode && textNode.textContent) {
+        // Match leading whitespace
+        const match = textNode.textContent.match(/^(\s+)/);
+        if (match && match[1]) {
+          const leading = match[1];
+          // Remove from inside
+          textNode.textContent = textNode.textContent.slice(leading.length);
+          // Add before opening bracket
+          const textBefore = document.createTextNode(leading);
+          openBracket.parentNode.insertBefore(textBefore, openBracket);
+        }
+      }
+    });
+  }
+
   // Merge brackets across container boundaries
   function mergeCrossContainerBrackets() {
     const closeBrackets = Array.from(document.querySelectorAll('[' + BRACKET_CLOSE + ']'));
@@ -192,7 +269,10 @@
       addBracketsToGroup(group);
     }
 
-    // Second pass: merge across container boundaries
+    // Second pass: normalize whitespace and punctuation at bracket boundaries
+    normalizeBracketBoundaries();
+
+    // Third pass: merge across container boundaries
     mergeCrossContainerBrackets();
   }
 
