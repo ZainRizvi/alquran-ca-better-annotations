@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "AlQuran.ca better annotations",
+  "version": "1.0.0",
+  "description": "Adds brackets around italicized translator annotations on alquran.ca for better readability",
+  "content_scripts": [
+    {
+      "matches": ["https://alquran.ca/read*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
