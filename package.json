@@ -1,0 +1,13 @@
+{
+  "name": "alquran-ca-better-annotations",
+  "version": "1.0.0",
+  "description": "Chrome extension to add brackets around translator annotations on alquran.ca",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "vitest": "^2.0.0"
+  }
+}
